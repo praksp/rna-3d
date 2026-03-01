@@ -13,7 +13,7 @@ The project is already a Git repo with an initial commit. To publish it as a **p
 2. **Add the remote and push** (replace `YOUR_USERNAME` and `REPO_NAME` with your values):
 
    ```bash
-   cd "/Users/prakash/ml-learning/cursor/kaggle rna 3d"
+   cd /path/to/kaggle-rna-3d-folding
    git remote add origin https://github.com/YOUR_USERNAME/REPO_NAME.git
    git branch -M main
    git push -u origin main
@@ -26,7 +26,7 @@ The project is already a Git repo with an initial commit. To publish it as a **p
 If you install [GitHub CLI](https://cli.github.com/) and run `gh auth login`:
 
 ```bash
-cd "/Users/prakash/ml-learning/cursor/kaggle rna 3d"
+cd /path/to/kaggle-rna-3d-folding
 gh repo create kaggle-rna-3d-folding --private --source=. --push
 ```
 

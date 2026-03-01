@@ -45,6 +45,7 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
+kaggle_notebook_runner.py
 
 # Logs
 *.log

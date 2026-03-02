@@ -2,19 +2,26 @@
 """
 Stanford RNA 3D Folding Part 2 - Advanced Prediction Pipeline.
 
-- Two-stage template matching + Kabsch superposition
-- Temporal cutoff filtering; predictions ordered by quality
-- Run log and config for reproducibility
+- Runs on local (Mac/Windows/Linux) or Kaggle; auto-detects data/output paths.
+- GPU (CuPy) when available (e.g. Kaggle GPU); CPU (NumPy) on Mac.
+- Optional parallel prediction (--workers) on CPU for faster runs.
 """
 
 import argparse
 import json
+import os
+import sys
 import time
 from pathlib import Path
+
+# Force CPU if requested, before backend is loaded
+if "--no-gpu" in sys.argv:
+    os.environ["RNA_USE_GPU"] = "0"
 
 import numpy as np
 
 from src import config
+from src import backend
 from src.data_loader import (
     load_train_sequences,
     load_test_sequences,
@@ -29,31 +36,34 @@ from src.submission import create_submission, validate_submission
 
 def main():
     parser = argparse.ArgumentParser(description="RNA 3D Folding Prediction Pipeline")
-    parser.add_argument("--data-dir", type=str, default="data",
-                        help="Directory containing competition data files")
-    parser.add_argument("--output", type=str, default="output/submission.csv",
-                        help="Output path for submission CSV")
-    parser.add_argument("--log-dir", type=str, default="output",
-                        help="Directory for run_log.json")
+    parser.add_argument("--data-dir", type=str, default=None,
+                        help="Data directory (default: auto-detect Kaggle or 'data')")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Submission CSV path (default: Kaggle working or 'output/submission.csv')")
+    parser.add_argument("--log-dir", type=str, default=None,
+                        help="Log directory (default: same as output dir)")
     parser.add_argument("--n-predictions", type=int, default=5,
                         help="Number of diverse predictions per target (default: 5)")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Parallel workers for prediction (CPU only; default 1, use 4+ for speed)")
+    parser.add_argument("--no-gpu", action="store_true",
+                        help="Force CPU even if CuPy is available")
     parser.add_argument("--use-boltz", action="store_true",
                         help="Use Boltz-1 for targets with poor template matches")
     parser.add_argument("--boltz-threshold", type=float, default=0.35,
                         help="Alignment score below which Boltz is used (default: 0.35)")
     args = parser.parse_args()
 
-    # Reproducibility
     np.random.seed(config.SEED)
 
-    data_dir = Path(args.data_dir)
-    out_path = Path(args.output)
-    log_dir = Path(args.log_dir)
+    data_dir = Path(args.data_dir) if args.data_dir else backend.get_data_dir()
+    out_path = Path(args.output) if args.output else (backend.get_output_dir() / "submission.csv")
+    log_dir = Path(args.log_dir) if args.log_dir else out_path.parent
     log_dir.mkdir(parents=True, exist_ok=True)
     start_time = time.time()
 
     _print_header()
-    _print_config()
+    _print_config(workers=args.workers)
 
     # --- Load data ---
     print("\n[1/6] Loading training sequences...")
@@ -78,13 +88,18 @@ def main():
     print(f"      Total residues to predict: {len(sample_sub_df)}")
 
     # --- Predict ---
-    print(f"\n[5/6] Generating predictions ({args.n_predictions} per target)...")
+    workers = args.workers if backend.device == "cpu" else 1
+    if workers > 1:
+        print(f"\n[5/6] Generating predictions ({args.n_predictions} per target, {workers} workers)...")
+    else:
+        print(f"\n[5/6] Generating predictions ({args.n_predictions} per target)...")
     predictions, run_log = predict_with_templates(
         test_seq_df,
         train_seq_df,
         train_structures,
         submission_targets,
         n_predictions=args.n_predictions,
+        workers=workers,
     )
 
     if args.use_boltz:
@@ -124,13 +139,15 @@ def _print_header():
     print()
 
 
-def _print_config():
+def _print_config(workers=1):
     print("  Strategy:")
     print("    • Two-stage template matching (k-mer → alignment)")
     print("    • Kabsch superposition after coordinate transfer")
     print("    • Temporal cutoff filter; length-similarity in scoring")
     print("    • Predictions ordered by quality (best first)")
-    print(f"    • Seed: {config.SEED}")
+    print(f"    • Backend: {backend.device}  |  Seed: {config.SEED}")
+    if workers > 1 and backend.device == "cpu":
+        print(f"    • Parallel: {workers} workers")
 
 
 def _print_summary_table(run_log: dict):

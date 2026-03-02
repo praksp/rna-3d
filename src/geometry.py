@@ -1,41 +1,49 @@
 """
 RNA structure geometry utilities.
 
-Generates idealized A-form RNA helix coordinates, provides coordinate
-manipulation functions, and handles NaN sanitization.
-
-A-form RNA helix parameters:
-- Rise per residue: ~2.81 Å
-- Rotation per residue: ~32.7°
-- Radius from helix axis to C1': ~9.4 Å
+Uses backend (NumPy or CuPy) for array ops so runs on CPU or GPU.
 """
 
 import numpy as np
+from . import backend
+
+xp = backend.xp
+
+
+def _to_xp(a):
+    """Ensure array is on backend (xp)."""
+    if a is None:
+        return None
+    if hasattr(a, "get"):  # CuPy
+        return a
+    return xp.asarray(a)
+
+
+def _to_numpy(a):
+    return backend.asnumpy(a)
 
 
 RISE_PER_RESIDUE = 2.81
-ROTATION_PER_RESIDUE = np.radians(32.7)
+ROTATION_PER_RESIDUE = 32.7 * 3.141592653589793 / 180.0  # radians
 HELIX_RADIUS = 9.4
 
 
-def generate_aform_helix(sequence_length: int, offset: int = 0) -> np.ndarray:
-    """Generate idealized A-form RNA helix C1' coordinates.
-
-    Returns array of shape (sequence_length, 3) with x, y, z coords.
-    """
-    indices = np.arange(sequence_length) + offset
+def generate_aform_helix(sequence_length: int, offset: int = 0):
+    """Generate idealized A-form RNA helix C1' coordinates. Returns (sequence_length, 3)."""
+    indices = xp.arange(sequence_length, dtype=xp.float32) + offset
     angles = indices * ROTATION_PER_RESIDUE
-    coords = np.zeros((sequence_length, 3))
-    coords[:, 0] = HELIX_RADIUS * np.cos(angles)
-    coords[:, 1] = HELIX_RADIUS * np.sin(angles)
+    coords = xp.zeros((sequence_length, 3), dtype=xp.float32)
+    coords[:, 0] = HELIX_RADIUS * xp.cos(angles)
+    coords[:, 1] = HELIX_RADIUS * xp.sin(angles)
     coords[:, 2] = indices * RISE_PER_RESIDUE
     return coords
 
 
-def _sanitize_coords(coords: np.ndarray) -> np.ndarray:
-    """Replace any remaining NaN/Inf values with interpolated or zero values."""
-    result = coords.copy()
-    for col_idx in range(result.shape[1]):
+def _sanitize_coords(coords):
+    """Replace NaN/Inf with interpolated or zero. Uses NumPy for interp then returns xp."""
+    arr = _to_numpy(coords)
+    result = arr.copy()
+    for col_idx in range(3):
         col = result[:, col_idx]
         bad = ~np.isfinite(col)
         if bad.all():
@@ -45,23 +53,20 @@ def _sanitize_coords(coords: np.ndarray) -> np.ndarray:
             valid_idx = np.where(~bad)[0]
             bad_idx = np.where(bad)[0]
             result[bad_idx, col_idx] = np.interp(bad_idx, valid_idx, col[valid_idx])
-    return result
+    return _to_xp(result)
 
 
-def resample_coordinates(coords: np.ndarray, target_len: int) -> np.ndarray:
-    """Resample coordinate array to a different length using interpolation.
-
-    Preserves overall shape while changing the number of points.
-    """
-    src_len = len(coords)
+def resample_coordinates(coords, target_len: int):
+    """Resample coordinate array to target_len via interpolation."""
+    arr = _to_numpy(coords)
+    src_len = len(arr)
     if src_len == target_len:
-        return coords.copy()
-
+        return _to_xp(arr.copy())
     result = np.zeros((target_len, 3), dtype=np.float32)
-    old_x = np.linspace(0, 1, src_len)
-    new_x = np.linspace(0, 1, target_len)
-
     for dim in range(3):
-        result[:, dim] = np.interp(new_x, old_x, coords[:, dim])
-
-    return result
+        result[:, dim] = np.interp(
+            np.linspace(0, 1, target_len),
+            np.linspace(0, 1, src_len),
+            arr[:, dim],
+        )
+    return _to_xp(result)

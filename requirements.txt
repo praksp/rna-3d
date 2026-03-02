@@ -4,5 +4,7 @@ scikit-learn
 biopython
 tqdm
 kaggle
+# Optional: GPU acceleration (NVIDIA CUDA). On Mac/local CPU, skip; on Kaggle GPU, add cupy-cuda12x
+# cupy-cuda12x
 # Optional: deep learning structure prediction (requires PyTorch)
 # boltz

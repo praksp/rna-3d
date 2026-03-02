@@ -77,6 +77,7 @@ flowchart TB
 | `multichain` | Parse stoichiometry and FASTA; homo-oligomer symmetric copies; hetero-oligomer per-chain then assemble |
 | `geometry` | A-form helix generation, coordinate sanitization, resampling |
 | `deep_learning` | Optional Boltz-1 CLI integration for de novo prediction |
+| `backend` | GPU (CuPy) or CPU (NumPy); auto path detection for Kaggle vs local |
 | `submission` | Build submission CSV, sanity checks, validation against sample |
 
 ---
@@ -98,6 +99,8 @@ Temporal cutoff filtering ensures only templates with release before the test ta
 
 ## Setup
 
+**Runs on local (Mac/Windows/Linux) and Kaggle.** On Mac (no CUDA), the pipeline uses CPU (NumPy). On Kaggle with GPU or a Linux machine with NVIDIA GPU + CuPy, coordinate and Kabsch ops use the GPU.
+
 ```bash
 pip install -r requirements.txt
 
@@ -118,12 +121,23 @@ kaggle competitions download -c stanford-rna-3d-folding-2 -f train_labels.csv -p
 
 ## Running
 
+Paths auto-detect: if `/kaggle/input` exists (Kaggle), that and `/kaggle/working` are used; otherwise `data/` and `output/`.
+
 ```bash
-# Template-based prediction (~60 seconds)
+# Template-based prediction (auto data/output paths)
+python run.py
+
+# Explicit paths (local)
 python run.py --data-dir data --output output/submission.csv
 
+# Faster on CPU: parallel prediction (e.g. 4 workers)
+python run.py --workers 4
+
+# Force CPU even if CuPy is installed
+python run.py --no-gpu
+
 # With Boltz-1 deep learning enhancement (slower; requires `pip install boltz`)
-python run.py --data-dir data --output output/submission.csv --use-boltz
+python run.py --use-boltz
 ```
 
 **Visualization**
@@ -149,6 +163,7 @@ python visualize.py --submission output/submission.csv --output-dir viz
 │   └── sample_submission.csv
 ├── src/
 │   ├── config.py          # Hyperparameters and seed
+│   ├── backend.py         # GPU (CuPy) / CPU (NumPy) and path detection
 │   ├── data_loader.py     # Data loading, structure lookup
 │   ├── alignment.py       # Needleman–Wunsch, Smith–Waterman
 │   ├── superposition.py  # Kabsch, TM-score

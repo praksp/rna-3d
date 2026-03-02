@@ -10,6 +10,10 @@ import re
 import numpy as np
 import pandas as pd
 
+from . import backend
+
+xp = backend.xp
+
 
 def parse_stoichiometry(stoich_str: str) -> list:
     """Parse stoichiometry string into chain definitions.
@@ -112,19 +116,9 @@ def get_chain_sequences(full_sequence: str, stoichiometry: list,
     return result
 
 
-def generate_symmetric_copies(single_chain_coords: np.ndarray,
-                               n_copies: int,
-                               arrangement: str = "circular") -> np.ndarray:
-    """Generate symmetrically arranged copies of a single chain.
-
-    Args:
-        single_chain_coords: (L, 3) coordinates of one chain
-        n_copies: number of copies to generate
-        arrangement: "circular" for ring arrangement, "linear" for stacking
-
-    Returns:
-        (n_copies * L, 3) coordinates of all chains concatenated
-    """
+def generate_symmetric_copies(single_chain_coords, n_copies: int,
+                               arrangement: str = "circular"):
+    """Generate symmetrically arranged copies. Coords can be NumPy or CuPy. Returns same backend."""
     L = len(single_chain_coords)
     if n_copies == 1:
         return single_chain_coords.copy()
@@ -132,28 +126,27 @@ def generate_symmetric_copies(single_chain_coords: np.ndarray,
     centroid = single_chain_coords.mean(axis=0)
     centered = single_chain_coords - centroid
 
-    max_extent = np.max(np.linalg.norm(centered, axis=1))
+    max_extent = float(xp.max(xp.linalg.norm(centered, axis=1)))
     separation = max_extent * 2.5
 
-    all_coords = np.zeros((n_copies * L, 3), dtype=np.float32)
+    all_coords = xp.zeros((n_copies * L, 3), dtype=xp.float32)
 
     if arrangement == "circular" and n_copies > 2:
-        radius = separation / (2.0 * np.sin(np.pi / n_copies))
+        radius = separation / (2.0 * float(xp.sin(3.141592653589793 / n_copies)))
         for i in range(n_copies):
-            angle = 2.0 * np.pi * i / n_copies
+            angle = 2.0 * 3.141592653589793 * i / n_copies
             rotation = _rotation_matrix_z(angle)
-            offset = np.array([radius * np.cos(angle),
-                               radius * np.sin(angle), 0.0])
+            offset = xp.array([radius * xp.cos(angle),
+                               radius * xp.sin(angle), 0.0], dtype=xp.float32)
             rotated = centered @ rotation.T
             all_coords[i * L:(i + 1) * L] = rotated + centroid + offset
     else:
-        # Linear stacking along z-axis
-        z_extent = centered[:, 2].max() - centered[:, 2].min()
+        z_extent = float(centered[:, 2].max() - centered[:, 2].min())
         stack_distance = max(z_extent * 1.3, separation)
         total_height = (n_copies - 1) * stack_distance
         for i in range(n_copies):
-            offset = np.array([0.0, 0.0, i * stack_distance - total_height / 2])
-            angle = 2.0 * np.pi * i / n_copies
+            offset = xp.array([0.0, 0.0, i * stack_distance - total_height / 2], dtype=xp.float32)
+            angle = 2.0 * 3.141592653589793 * i / n_copies
             rotation = _rotation_matrix_z(angle)
             rotated = centered @ rotation.T
             all_coords[i * L:(i + 1) * L] = rotated + centroid + offset
@@ -161,21 +154,14 @@ def generate_symmetric_copies(single_chain_coords: np.ndarray,
     return all_coords
 
 
-def _rotation_matrix_z(angle: float) -> np.ndarray:
-    """Rotation matrix around the z-axis."""
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float32)
+def _rotation_matrix_z(angle: float):
+    c, s = float(xp.cos(angle)), float(xp.sin(angle))
+    return xp.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=xp.float32)
 
 
 def assemble_multimer(chain_coords_list: list, stoichiometry: list,
-                      full_length: int) -> np.ndarray:
-    """Assemble a multi-chain structure from per-chain predictions.
-
-    For homo-oligomers: uses first chain prediction and generates symmetric copies.
-    For hetero-oligomers: concatenates chain predictions.
-
-    Returns (full_length, 3) coordinate array.
-    """
+                      full_length: int):
+    """Assemble multi-chain structure. Returns (full_length, 3) on same backend as inputs."""
     unique_chains = set(label for label, _ in stoichiometry)
 
     if len(unique_chains) == 1 and len(chain_coords_list) >= 1:
@@ -185,25 +171,19 @@ def assemble_multimer(chain_coords_list: list, stoichiometry: list,
             result = generate_symmetric_copies(single_chain, n_copies)
             if len(result) >= full_length:
                 return result[:full_length]
-            # Pad if needed
-            padded = np.zeros((full_length, 3), dtype=np.float32)
+            padded = xp.zeros((full_length, 3), dtype=xp.float32)
             padded[:len(result)] = result
             return padded
         else:
             if len(single_chain) >= full_length:
                 return single_chain[:full_length]
-            padded = np.zeros((full_length, 3), dtype=np.float32)
+            padded = xp.zeros((full_length, 3), dtype=xp.float32)
             padded[:len(single_chain)] = single_chain
             return padded
 
-    # Hetero-oligomer: concatenate
-    all_coords = []
-    for coords in chain_coords_list:
-        all_coords.append(coords)
-    concatenated = np.concatenate(all_coords, axis=0)
-
+    concatenated = xp.concatenate(chain_coords_list, axis=0)
     if len(concatenated) >= full_length:
         return concatenated[:full_length]
-    padded = np.zeros((full_length, 3), dtype=np.float32)
+    padded = xp.zeros((full_length, 3), dtype=xp.float32)
     padded[:len(concatenated)] = concatenated
     return padded

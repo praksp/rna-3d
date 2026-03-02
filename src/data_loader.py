@@ -1,10 +1,12 @@
-"""Load and parse competition data files."""
+"""Load and parse competition data files. Coordinate arrays use backend (NumPy/CuPy)."""
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
+
+from . import backend
 
 
 def load_train_sequences(data_dir: str) -> pd.DataFrame:
@@ -63,7 +65,7 @@ def build_train_structure_lookup(train_labels: pd.DataFrame) -> dict:
             copy_group = group[group["copy"] == copy_id].sort_values("resid")
             coords = copy_group[["x_1", "y_1", "z_1"]].values.astype(np.float32)
             _interpolate_nan(coords)
-            all_copies[copy_id] = coords
+            all_copies[copy_id] = backend.xp.asarray(coords)
 
         primary = group[group["copy"] == copies_available[0]].sort_values("resid")
         primary_coords = all_copies[copies_available[0]]

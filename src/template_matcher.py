@@ -2,16 +2,16 @@
 Advanced template-based RNA structure prediction.
 
 - Two-stage: k-mer prefilter → sequence alignment ranking
-- Alignment-guided transfer + Kabsch superposition
+- Alignment-guided transfer + Kabsch superposition (backend: NumPy/CuPy)
 - Temporal cutoff filtering; length-similarity in scoring
 - Predictions ordered by quality (best first for best-of-5)
-- Optional run log for reproducibility
 """
 
 import numpy as np
 from tqdm import tqdm
 
 from . import config
+from . import backend
 from .alignment import compute_alignment_score, get_residue_mapping
 from .superposition import kabsch_rmsd, apply_superposition
 from .multichain import (
@@ -19,6 +19,8 @@ from .multichain import (
     generate_symmetric_copies, assemble_multimer,
 )
 from .geometry import generate_aform_helix, _sanitize_coords
+
+xp = backend.xp
 
 
 def _parse_cutoff(date_str) -> "datetime":
@@ -113,45 +115,38 @@ def rank_templates_by_alignment(test_seq: str, candidate_ids: list,
     return results
 
 
-def transfer_coords_with_alignment(template_coords: np.ndarray,
-                                    aligned_pairs: list,
-                                    target_len: int,
-                                    template_len: int,
+def transfer_coords_with_alignment(template_coords, aligned_pairs: list,
+                                    target_len: int, template_len: int,
                                     apply_kabsch: bool = True,
-                                    extrapolation_cap_ratio: float = None) -> np.ndarray:
+                                    extrapolation_cap_ratio: float = None):
     """Transfer coords via alignment; optionally apply Kabsch; cap extrapolation with A-form."""
     extrapolation_cap_ratio = extrapolation_cap_ratio or config.EXTRAPOLATION_CAP_RATIO
     mapping = get_residue_mapping(aligned_pairs, target_len, template_len)
 
-    result = np.zeros((target_len, 3), dtype=np.float32)
+    result = xp.zeros((target_len, 3), dtype=xp.float32)
     cap_len = int(template_len * extrapolation_cap_ratio) if template_len > 0 else target_len
 
     for i in range(target_len):
-        j = mapping[i]
+        j = int(mapping[i])
         if 0 <= j < len(template_coords):
             result[i] = template_coords[j]
         elif len(template_coords) > 0:
             result[i] = template_coords[min(j, len(template_coords) - 1)]
 
-    # Beyond cap: fill with A-form helix segment (smooth continuation)
     if target_len > cap_len and cap_len >= 3:
-        from .geometry import generate_aform_helix
         tail_len = target_len - cap_len
-        # orient A-form from last transferred direction
         p0, p1 = result[cap_len - 2], result[cap_len - 1]
         direction = p1 - p0
-        norm = np.linalg.norm(direction)
+        norm = float(xp.linalg.norm(direction))
         if norm < 1e-6:
-            direction = np.array([1.0, 0.0, 0.0])
+            direction = xp.array([1.0, 0.0, 0.0], dtype=xp.float32)
         else:
             direction = direction / norm
         aform = generate_aform_helix(tail_len, offset=0)
-        # scale A-form z to ~5.9 Å per residue and translate to result[cap_len-1]
         aform[:, 2] *= (5.9 / 2.81)
         aform += result[cap_len - 1] - aform[0]
         result[cap_len:] = aform
 
-    # Smoothing
     if target_len > config.SMOOTHING_WINDOW:
         w = config.SMOOTHING_WINDOW
         half = w // 2
@@ -160,7 +155,6 @@ def transfer_coords_with_alignment(template_coords: np.ndarray,
             smoothed[i] = result[i - half : i - half + w].mean(axis=0)
         result = smoothed
 
-    # Kabsch: superimpose transferred onto template frame using aligned residues
     if apply_kabsch and aligned_pairs and len(aligned_pairs) >= 3:
         t_indices = []
         s_indices = []
@@ -169,9 +163,9 @@ def transfer_coords_with_alignment(template_coords: np.ndarray,
                 t_indices.append(ti)
                 s_indices.append(si)
         if len(t_indices) >= 3:
-            P = result[np.array(t_indices)]
-            Q = template_coords[np.array(s_indices)]
-            if np.isfinite(P).all() and np.isfinite(Q).all():
+            P = result[xp.array(t_indices)]
+            Q = template_coords[xp.array(s_indices)]
+            if bool(xp.isfinite(P).all() and xp.isfinite(Q).all()):
                 R, t, _ = kabsch_rmsd(P, Q)
                 result = apply_superposition(result, R, t)
 
@@ -256,31 +250,40 @@ def predict_single_chain(chain_seq: str, target_len: int,
                 predictions.append(coords)
                 log_entries.append({"source": "copy", "template_id": best_id, "score": float(best_score)})
 
-    rng = np.random.default_rng(config.SEED)
+    try:
+        rng = xp.random.default_rng(config.SEED)
+    except AttributeError:
+        rng = np.random.default_rng(config.SEED)
     while len(predictions) < n_predictions:
         base = predictions[0].copy()
         noise = rng.normal(0, config.PERTURBATION_SIGMA, base.shape)
+        if hasattr(noise, "get"):
+            noise = noise
+        else:
+            noise = xp.asarray(noise)
         predictions.append(_sanitize_coords(base + noise))
         log_entries.append({"source": "perturb", "template_id": None, "score": 0.0})
 
     return predictions, log_entries
 
 
-def _fallback_transfer(template_coords: np.ndarray, target_len: int) -> np.ndarray:
+def _fallback_transfer(template_coords, target_len: int):
     """Simple coordinate transfer when alignment is not available."""
     template_len = len(template_coords)
     if template_len == target_len:
         return template_coords.copy()
     if template_len > target_len:
         return template_coords[:target_len].copy()
-    result = np.zeros((target_len, 3), dtype=np.float32)
+    # interp is numpy-only; do on host then return xp
+    t_np = backend.asnumpy(template_coords)
+    result_np = np.zeros((target_len, 3), dtype=np.float32)
     for dim in range(3):
-        result[:, dim] = np.interp(
+        result_np[:, dim] = np.interp(
             np.linspace(0, 1, target_len),
             np.linspace(0, 1, template_len),
-            template_coords[:, dim],
+            t_np[:, dim],
         )
-    return result
+    return xp.asarray(result_np)
 
 
 def _allowed_templates_for_cutoff(train_sequences_df, test_cutoff_str) -> set:
@@ -296,16 +299,105 @@ def _allowed_templates_for_cutoff(train_sequences_df, test_cutoff_str) -> set:
     return allowed if len(allowed) > 0 else None
 
 
+def predict_one_target(row, train_seq_map, train_structures, submission_targets,
+                       n_predictions: int, train_sequences_df) -> tuple:
+    """Predict a single target. Returns (target_id, predictions_list, run_log_entry) or (None, None, None) if skip."""
+    target_id = row["target_id"]
+    if target_id not in submission_targets:
+        return None, None, None
+    test_seq = row["sequence"]
+    stoich_str = row["stoichiometry"]
+    all_sequences_str = row.get("all_sequences", None)
+    test_cutoff = row.get("temporal_cutoff", None)
+    n_residues = len(submission_targets[target_id])
+    stoich = parse_stoichiometry(stoich_str)
+    total_copies = sum(count for _, count in stoich)
+    unique_chain_labels = set(label for label, _ in stoich)
+    allowed = _allowed_templates_for_cutoff(train_sequences_df, test_cutoff)
+    chains = get_chain_sequences(test_seq, stoich, all_sequences_str)
+
+    if total_copies > 1 and len(unique_chain_labels) == 1:
+        _, n_copies = stoich[0]
+        chain_seq = chains[0][2]
+        chain_len = len(chain_seq)
+        chain_preds, log_entries = predict_single_chain(
+            chain_seq, chain_len, train_seq_map, train_structures,
+            allowed_template_ids=allowed, n_predictions=n_predictions,
+        )
+        full_preds = []
+        for pred in chain_preds:
+            assembled = generate_symmetric_copies(pred, n_copies)
+            if len(assembled) >= n_residues:
+                assembled = assembled[:n_residues]
+            else:
+                padded = xp.zeros((n_residues, 3), dtype=xp.float32)
+                padded[:len(assembled)] = assembled
+                assembled = padded
+            full_preds.append(backend.asnumpy(assembled))
+        log_entry = {"type": "homo-oligomer", "n_copies": n_copies, "predictions": log_entries,
+                     "templates": [e.get("template_id") for e in log_entries if e.get("template_id")],
+                     "scores": [e.get("score", 0) for e in log_entries],
+                     "best_score": log_entries[0]["score"] if log_entries else 0.0,
+                     "n_residues": n_residues, "chain_len": chain_len}
+        return target_id, full_preds, log_entry
+
+    if total_copies > 1 and len(unique_chain_labels) > 1:
+        all_chain_preds = []
+        for label, i, chain_seq in chains:
+            chain_len = len(chain_seq)
+            chain_pred, _ = predict_single_chain(
+                chain_seq, chain_len, train_seq_map, train_structures,
+                allowed_template_ids=allowed, n_predictions=n_predictions,
+            )
+            all_chain_preds.append(chain_pred)
+        full_preds = []
+        for pred_idx in range(n_predictions):
+            chain_coords_list = [c[pred_idx] for c in all_chain_preds]
+            assembled = assemble_multimer(chain_coords_list, stoich, n_residues)
+            full_preds.append(backend.asnumpy(assembled))
+        log_entry = {"type": "hetero-oligomer", "n_residues": n_residues,
+                     "templates": [], "scores": [], "best_score": 0.0}
+        return target_id, full_preds, log_entry
+
+    preds, log_entries = predict_single_chain(
+        test_seq, n_residues, train_seq_map, train_structures,
+        allowed_template_ids=allowed, n_predictions=n_predictions,
+    )
+    log_entry = {"type": "single", "predictions": log_entries,
+                 "templates": [e.get("template_id") for e in log_entries if e.get("template_id")],
+                 "scores": [e.get("score", 0) for e in log_entries],
+                 "best_score": log_entries[0]["score"] if log_entries else 0.0,
+                 "n_residues": n_residues}
+    return target_id, [backend.asnumpy(p) for p in preds], log_entry
+
+
 def predict_with_templates(test_sequences_df, train_sequences_df,
                            train_structures: dict, submission_targets: dict,
-                           n_predictions: int = 5) -> tuple:
-    """Generate predictions; return (predictions_dict, run_log_dict)."""
+                           n_predictions: int = 5, workers: int = 1) -> tuple:
+    """Generate predictions; return (predictions_dict, run_log_dict). Use workers>1 for CPU parallel."""
     train_seq_map = dict(zip(
         train_sequences_df["target_id"],
         train_sequences_df["sequence"],
     ))
     predictions = {}
     run_log = {}
+
+    if workers > 1 and backend.device == "cpu":
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        rows = [row for _, row in test_sequences_df.iterrows() if row["target_id"] in submission_targets]
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    predict_one_target, row, train_seq_map, train_structures,
+                    submission_targets, n_predictions, train_sequences_df,
+                ): row for row in rows
+            }
+            for fut in tqdm(as_completed(futures), total=len(futures), desc="Predicting"):
+                target_id, preds, log_entry = fut.result()
+                if target_id is not None:
+                    predictions[target_id] = preds
+                    run_log[target_id] = log_entry
+        return predictions, run_log
 
     for _, row in tqdm(test_sequences_df.iterrows(), total=len(test_sequences_df),
                        desc="Predicting"):
@@ -345,13 +437,12 @@ def predict_with_templates(test_sequences_df, train_sequences_df,
                 if len(assembled) >= n_residues:
                     assembled = assembled[:n_residues]
                 else:
-                    padded = np.zeros((n_residues, 3), dtype=np.float32)
+                    padded = xp.zeros((n_residues, 3), dtype=xp.float32)
                     padded[:len(assembled)] = assembled
                     assembled = padded
-                full_preds.append(assembled)
+                full_preds.append(backend.asnumpy(assembled))
             run_log[target_id]["templates"] = [e.get("template_id") for e in log_entries if e.get("template_id")]
             run_log[target_id]["scores"] = [e.get("score", 0) for e in log_entries]
-            # already ordered by quality
             run_log[target_id]["best_score"] = log_entries[0]["score"] if log_entries else 0.0
             run_log[target_id]["n_residues"] = n_residues
             run_log[target_id]["chain_len"] = chain_len
@@ -370,9 +461,9 @@ def predict_with_templates(test_sequences_df, train_sequences_df,
 
             full_preds = []
             for pred_idx in range(n_predictions):
-                chain_coords_list = [cp[pred_idx] for cp in all_chain_preds]
+                chain_coords_list = [c[pred_idx] for c in all_chain_preds]
                 assembled = assemble_multimer(chain_coords_list, stoich, n_residues)
-                full_preds.append(assembled)
+                full_preds.append(backend.asnumpy(assembled))
 
             run_log[target_id] = {"type": "hetero-oligomer", "n_residues": n_residues}
             run_log[target_id]["templates"] = []
@@ -391,6 +482,6 @@ def predict_with_templates(test_sequences_df, train_sequences_df,
             run_log[target_id]["scores"] = [e.get("score", 0) for e in log_entries]
             run_log[target_id]["best_score"] = log_entries[0]["score"] if log_entries else 0.0
             run_log[target_id]["n_residues"] = n_residues
-            predictions[target_id] = preds
+            predictions[target_id] = [backend.asnumpy(p) for p in preds]
 
     return predictions, run_log

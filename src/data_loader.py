@@ -63,7 +63,7 @@ def build_train_structure_lookup(train_labels: pd.DataFrame) -> dict:
 
         for copy_id in copies_available:
             copy_group = group[group["copy"] == copy_id].sort_values("resid")
-            coords = copy_group[["x_1", "y_1", "z_1"]].values.astype(np.float32)
+            coords = copy_group[["x_1", "y_1", "z_1"]].values.astype(np.float64)
             _interpolate_nan(coords)
             all_copies[copy_id] = backend.xp.asarray(coords)
 

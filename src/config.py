@@ -24,3 +24,7 @@ SMOOTHING_WINDOW = 5  # moving average window for transferred coords
 # Diversity
 MIN_ALIGNMENT_SCORE_FOR_TEMPLATE = 0.05  # below this use A-form helix
 PERTURBATION_SIGMA = 0.3  # Gaussian noise for last-resort diversity
+
+# Output precision (Kaggle uses full-precision for scoring; 6 decimals for coordinates)
+COORD_DECIMALS = 6
+COORD_DTYPE = "float64"  # full precision in pipeline, then round in CSV

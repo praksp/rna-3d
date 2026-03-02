@@ -123,7 +123,7 @@ def transfer_coords_with_alignment(template_coords, aligned_pairs: list,
     extrapolation_cap_ratio = extrapolation_cap_ratio or config.EXTRAPOLATION_CAP_RATIO
     mapping = get_residue_mapping(aligned_pairs, target_len, template_len)
 
-    result = xp.zeros((target_len, 3), dtype=xp.float32)
+    result = xp.zeros((target_len, 3), dtype=xp.float64)
     cap_len = int(template_len * extrapolation_cap_ratio) if template_len > 0 else target_len
 
     for i in range(target_len):
@@ -139,7 +139,7 @@ def transfer_coords_with_alignment(template_coords, aligned_pairs: list,
         direction = p1 - p0
         norm = float(xp.linalg.norm(direction))
         if norm < 1e-6:
-            direction = xp.array([1.0, 0.0, 0.0], dtype=xp.float32)
+            direction = xp.array([1.0, 0.0, 0.0], dtype=xp.float64)
         else:
             direction = direction / norm
         aform = generate_aform_helix(tail_len, offset=0)
@@ -276,7 +276,7 @@ def _fallback_transfer(template_coords, target_len: int):
         return template_coords[:target_len].copy()
     # interp is numpy-only; do on host then return xp
     t_np = backend.asnumpy(template_coords)
-    result_np = np.zeros((target_len, 3), dtype=np.float32)
+    result_np = np.zeros((target_len, 3), dtype=np.float64)
     for dim in range(3):
         result_np[:, dim] = np.interp(
             np.linspace(0, 1, target_len),
@@ -330,7 +330,7 @@ def predict_one_target(row, train_seq_map, train_structures, submission_targets,
             if len(assembled) >= n_residues:
                 assembled = assembled[:n_residues]
             else:
-                padded = xp.zeros((n_residues, 3), dtype=xp.float32)
+                padded = xp.zeros((n_residues, 3), dtype=xp.float64)
                 padded[:len(assembled)] = assembled
                 assembled = padded
             full_preds.append(backend.asnumpy(assembled))
@@ -437,7 +437,7 @@ def predict_with_templates(test_sequences_df, train_sequences_df,
                 if len(assembled) >= n_residues:
                     assembled = assembled[:n_residues]
                 else:
-                    padded = xp.zeros((n_residues, 3), dtype=xp.float32)
+                    padded = xp.zeros((n_residues, 3), dtype=xp.float64)
                     padded[:len(assembled)] = assembled
                     assembled = padded
                 full_preds.append(backend.asnumpy(assembled))

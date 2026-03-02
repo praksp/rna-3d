@@ -19,7 +19,7 @@ def kabsch_rmsd(P, Q):
     H = p.T @ q
     U, S, Vt = xp.linalg.svd(H)
     d = xp.linalg.det(Vt.T @ U.T)
-    sign_matrix = xp.diag(xp.array([1.0, 1.0, float(xp.sign(d))], dtype=xp.float32))
+    sign_matrix = xp.diag(xp.array([1.0, 1.0, float(xp.sign(d))], dtype=xp.float64))
     R = Vt.T @ sign_matrix @ U.T
     t = centroid_Q - R @ centroid_P
     p_rotated = p @ R.T
@@ -41,7 +41,7 @@ def superimpose_with_alignment(template_coords, target_coords, template_indices,
     P = P[valid]
     Q = Q[valid]
     if len(P) < 3:
-        return xp.eye(3, dtype=xp.float32), xp.zeros(3, dtype=xp.float32), float("inf")
+        return xp.eye(3, dtype=xp.float64), xp.zeros(3, dtype=xp.float64), float("inf")
     return kabsch_rmsd(P, Q)
 
 

@@ -129,7 +129,7 @@ def generate_symmetric_copies(single_chain_coords, n_copies: int,
     max_extent = float(xp.max(xp.linalg.norm(centered, axis=1)))
     separation = max_extent * 2.5
 
-    all_coords = xp.zeros((n_copies * L, 3), dtype=xp.float32)
+    all_coords = xp.zeros((n_copies * L, 3), dtype=xp.float64)
 
     if arrangement == "circular" and n_copies > 2:
         radius = separation / (2.0 * float(xp.sin(3.141592653589793 / n_copies)))
@@ -137,7 +137,7 @@ def generate_symmetric_copies(single_chain_coords, n_copies: int,
             angle = 2.0 * 3.141592653589793 * i / n_copies
             rotation = _rotation_matrix_z(angle)
             offset = xp.array([radius * xp.cos(angle),
-                               radius * xp.sin(angle), 0.0], dtype=xp.float32)
+                               radius * xp.sin(angle), 0.0], dtype=xp.float64)
             rotated = centered @ rotation.T
             all_coords[i * L:(i + 1) * L] = rotated + centroid + offset
     else:
@@ -145,7 +145,7 @@ def generate_symmetric_copies(single_chain_coords, n_copies: int,
         stack_distance = max(z_extent * 1.3, separation)
         total_height = (n_copies - 1) * stack_distance
         for i in range(n_copies):
-            offset = xp.array([0.0, 0.0, i * stack_distance - total_height / 2], dtype=xp.float32)
+            offset = xp.array([0.0, 0.0, i * stack_distance - total_height / 2], dtype=xp.float64)
             angle = 2.0 * 3.141592653589793 * i / n_copies
             rotation = _rotation_matrix_z(angle)
             rotated = centered @ rotation.T
@@ -156,7 +156,7 @@ def generate_symmetric_copies(single_chain_coords, n_copies: int,
 
 def _rotation_matrix_z(angle: float):
     c, s = float(xp.cos(angle)), float(xp.sin(angle))
-    return xp.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=xp.float32)
+    return xp.array([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=xp.float64)
 
 
 def assemble_multimer(chain_coords_list: list, stoichiometry: list,
@@ -171,19 +171,19 @@ def assemble_multimer(chain_coords_list: list, stoichiometry: list,
             result = generate_symmetric_copies(single_chain, n_copies)
             if len(result) >= full_length:
                 return result[:full_length]
-            padded = xp.zeros((full_length, 3), dtype=xp.float32)
+            padded = xp.zeros((full_length, 3), dtype=xp.float64)
             padded[:len(result)] = result
             return padded
         else:
             if len(single_chain) >= full_length:
                 return single_chain[:full_length]
-            padded = xp.zeros((full_length, 3), dtype=xp.float32)
+            padded = xp.zeros((full_length, 3), dtype=xp.float64)
             padded[:len(single_chain)] = single_chain
             return padded
 
     concatenated = xp.concatenate(chain_coords_list, axis=0)
     if len(concatenated) >= full_length:
         return concatenated[:full_length]
-    padded = xp.zeros((full_length, 3), dtype=xp.float32)
+    padded = xp.zeros((full_length, 3), dtype=xp.float64)
     padded[:len(concatenated)] = concatenated
     return padded

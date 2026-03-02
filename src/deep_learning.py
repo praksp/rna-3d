@@ -154,5 +154,5 @@ def _extract_c1_prime(filepath: Path) -> np.ndarray:
         return None
 
     if coords:
-        return np.array(coords, dtype=np.float32)
+        return np.array(coords, dtype=np.float64)
     return None

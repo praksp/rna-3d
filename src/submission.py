@@ -1,9 +1,10 @@
 """Generate the submission CSV file in the required format."""
 
-import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
+
+from . import config
 
 
 def _sanity_check_coords(df: pd.DataFrame, coord_cols: list, sample_size: int = 200) -> list:
@@ -70,11 +71,12 @@ def create_submission(predictions: dict, submission_targets: dict,
                 "resname": res["resname"],
                 "resid": res["resid"],
             }
+            decimals = getattr(config, "COORD_DECIMALS", 6)
             for j in range(5):
                 if j < len(pred_list) and i < len(pred_list[j]):
-                    row[f"x_{j+1}"] = round(float(pred_list[j][i, 0]), 3)
-                    row[f"y_{j+1}"] = round(float(pred_list[j][i, 1]), 3)
-                    row[f"z_{j+1}"] = round(float(pred_list[j][i, 2]), 3)
+                    row[f"x_{j+1}"] = round(float(pred_list[j][i, 0]), decimals)
+                    row[f"y_{j+1}"] = round(float(pred_list[j][i, 1]), decimals)
+                    row[f"z_{j+1}"] = round(float(pred_list[j][i, 2]), decimals)
                 else:
                     row[f"x_{j+1}"] = 0.0
                     row[f"y_{j+1}"] = 0.0

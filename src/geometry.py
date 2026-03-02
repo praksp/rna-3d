@@ -30,9 +30,9 @@ HELIX_RADIUS = 9.4
 
 def generate_aform_helix(sequence_length: int, offset: int = 0):
     """Generate idealized A-form RNA helix C1' coordinates. Returns (sequence_length, 3)."""
-    indices = xp.arange(sequence_length, dtype=xp.float32) + offset
+    indices = xp.arange(sequence_length, dtype=xp.float64) + offset
     angles = indices * ROTATION_PER_RESIDUE
-    coords = xp.zeros((sequence_length, 3), dtype=xp.float32)
+    coords = xp.zeros((sequence_length, 3), dtype=xp.float64)
     coords[:, 0] = HELIX_RADIUS * xp.cos(angles)
     coords[:, 1] = HELIX_RADIUS * xp.sin(angles)
     coords[:, 2] = indices * RISE_PER_RESIDUE
@@ -62,7 +62,7 @@ def resample_coordinates(coords, target_len: int):
     src_len = len(arr)
     if src_len == target_len:
         return _to_xp(arr.copy())
-    result = np.zeros((target_len, 3), dtype=np.float32)
+    result = np.zeros((target_len, 3), dtype=np.float64)
     for dim in range(3):
         result[:, dim] = np.interp(
             np.linspace(0, 1, target_len),

@@ -136,8 +136,8 @@ def generate_symmetric_copies(single_chain_coords, n_copies: int,
         for i in range(n_copies):
             angle = 2.0 * 3.141592653589793 * i / n_copies
             rotation = _rotation_matrix_z(angle)
-            offset = xp.array([radius * xp.cos(angle),
-                               radius * xp.sin(angle), 0.0], dtype=xp.float64)
+            cx, sx = float(xp.cos(angle)), float(xp.sin(angle))
+            offset = xp.array([radius * cx, radius * sx, 0.0], dtype=xp.float64)
             rotated = centered @ rotation.T
             all_coords[i * L:(i + 1) * L] = rotated + centroid + offset
     else:
